@@ -23,6 +23,7 @@
   2024/10/07：データサイズ不足だったので，キャラクタリスティックを6つに増やした
   2024/12/06：IMUを用いた加速度取得機能を追加
   2024/12/18：ローパスフィルタの追加→削除
+  2025/01/17：不要な部分を削る
  ****************************************************/
 
 #include "MTKNanoESP32.h"
@@ -63,20 +64,13 @@ void MTKNanoESP32::setup_sensor(int rx, int tx, int *muxPins, bool raw_data, int
     // Set mulptiplexer
     for (int k = 0; k < this->_numMuxPins; k++)
     {
-        pinMode(this->_muxPins[k], OUTPUT); // 信号出力ピンの設定
-        // Serial.println(_muxPins[k]);
+        pinMode(this->_muxPins[k], OUTPUT); // 信号出力ピンの設
     }
-
-    // // ローパスフィルタの初期化
-    // lowpassFilters = new FilterOnePole*[rx];
-    // for (int i = 0; i < rx; i++) {
-    //     lowpassFilters[i] = new FilterOnePole(LOWPASS, 1); // カットオフ周波数を設定
-    // }
 
     pinMode(A0, INPUT); // this is a workaround for a bug
 
-    //     Save noise values in case of raw_data == False
-    // ノイズの取得?
+    // タッチ認識用の基底値（=noise）の取得
+    // TODO:形式を変えるべき
     if (this->_raw_data == false)
     {
         for (int ii = 0; ii < 10; ii++)
@@ -108,13 +102,14 @@ void MTKNanoESP32::setup_sensor(int rx, int tx, int *muxPins, bool raw_data, int
         BLE.advertise();
     }
 
+    // 一旦コメントアウト
     // IMUの起動
-    MPU_addr=0x68; // I2C address of the MPU-6050
-    Wire1.begin(_IMUPins[0], _IMUPins[1]); //sda, scl
-    Wire1.beginTransmission(MPU_addr);
-    Wire1.write(0x6B);  // PWR_MGMT_1 register
-    Wire1.write(0);     // set to zero (wakes up the MPU-6050)
-    Wire1.endTransmission(true);
+    // MPU_addr=0x68; // I2C address of the MPU-6050
+    // Wire1.begin(_IMUPins[0], _IMUPins[1]); //sda, scl
+    // Wire1.beginTransmission(MPU_addr);
+    // Wire1.write(0x6B);  // PWR_MGMT_1 register
+    // Wire1.write(0);     // set to zero (wakes up the MPU-6050)
+    // Wire1.endTransmission(true);
 }
 
 /**
@@ -153,7 +148,7 @@ void MTKNanoESP32::read()
             index += length;
 
             if(i == 22){
-                getIMU();
+                // getIMU();
                 // 加速度
                 for(int k = 0; k < 3; ++k){
                     length = snprintf(sendValues + index, bufferSize - index, "_%d", this->accel[k]); // 行終端の出力
@@ -171,45 +166,18 @@ void MTKNanoESP32::read()
             }
         }
     }else if (Serial){
-        // データの出力方式によって変化
-        if (_raw_data == true) // 計測値をそのまま出力する
+        // データの出力方式によって変化→シリアル通信は生の値のみにした
+        for (int i = 0; i < this->_numTx; i++) // 各出力先につき繰り返し
         {
-            for (int i = 0; i < this->_numTx; i++) // 各出力先につき繰り返し
+            selectChannelOut(i); // 信号送信先の変更
+            Serial.print(i);     // 行番号をシリアル出力
+            // Read RX
+            for (int j = 0; j < this->_numRx; j++)
             {
-                selectChannelOut(i); // 信号送信先の変更
-                Serial.print(i);     // 行番号をシリアル出力
-                // Read RX
-                for (int j = 0; j < this->_numRx; j++)
-                {
-                    Serial.print(",");
-                    Serial.print(analogRead(_analogPins[j]));
-                }
-
-                Serial.println();
+                Serial.print(",");
+                Serial.print(analogRead(_analogPins[j]));
             }
-        }
-        else
-        {
-            for (int i = 0; i < this->_numTx; i++)
-            {
-                selectChannelOut(i);
-                Serial.print(i);
-                // Read RX
-                for (int j = 0; j < this->_numRx; j++)
-                {
-                    Serial.print(",");
-                    int tmp = analogRead(_analogPins[j]) - noise[i][j];
-                    if (tmp > this->_threshold)
-                    {
-                        Serial.print(true);
-                    }
-                    else
-                    {
-                        Serial.print(false);
-                    }
-                }
-                Serial.println();
-            }
+            Serial.println();
         }
     }
 }
