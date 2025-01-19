@@ -24,20 +24,12 @@
   2024/12/06：IMUを用いた加速度取得機能を追加
   2024/12/18：ローパスフィルタの追加→削除
   2025/01/17：不要な部分を削る
+  2025/01/17：並列処理モードを作成
  ****************************************************/
 
 #include "MTKNanoESP32.h"
 
 MTKNanoESP32::MTKNanoESP32(void)
-  : bleService("8fc03459-5012-dcc8-f6c5-3425f9bb10ed"),
-    charArray {
-      BLECharacteristic("b70c5e87-fcd8-eec1-bf23-6e98d6b38730", BLERead | BLENotify, 180),
-      BLECharacteristic("b70c5e87-fcd8-eec1-bf23-6e98d6b38731", BLERead | BLENotify, 180),
-      BLECharacteristic("b70c5e87-fcd8-eec1-bf23-6e98d6b38732", BLERead | BLENotify, 180),
-      BLECharacteristic("b70c5e87-fcd8-eec1-bf23-6e98d6b38733", BLERead | BLENotify, 180),
-      BLECharacteristic("b70c5e87-fcd8-eec1-bf23-6e98d6b38734", BLERead | BLENotify, 180),
-      BLECharacteristic("b70c5e87-fcd8-eec1-bf23-6e98d6b38735", BLERead | BLENotify, 180)
-    }
 {
 }
 /**
@@ -46,18 +38,20 @@ MTKNanoESP32::MTKNanoESP32(void)
  *   @return void
  */
 // スケッチ内のsetup()内にて呼び出される関数
-void MTKNanoESP32::setup_sensor(int rx, int tx, int *muxPins, bool raw_data, int threshold, int numMuxPins, int *analogPins, bool toBLE, int *IMUPins)
+void MTKNanoESP32::setup_sensor(int *muxPins, bool correct, int threshold, int numMuxPins, int *analogPins, bool toBLE, int *IMUPins, double timelineDatas[][8][10])
 {
-    this->_numRx = rx;              // 入力端子数
-    this->_numTx = tx;              // 出力端子数
+    this->_numRx = 8;              // 入力端子数
+    this->_numTx = 23;              // 出力端子数
     this->_muxPins = muxPins;       // 各桁を示すピンの内容
-    this->_raw_data = raw_data;     // 出力の種類（値int or 判定bool）
+    this->_correct = correct;     // 補正の有無
     this->_threshold = threshold;   // 閾値
     this->_numMuxPins = numMuxPins; // 桁数
     this->_analogPins = analogPins; // アナログ入力ピンの内訳
     this->toBLE = toBLE; // 出力先をBLEにするか
     this->_IMUPins = IMUPins;
-
+    this->timelineDatas = timelineDatas;
+    this->writeID = 0; // 書き込み先インデックスのリセット
+    
     // set the PWM values
     // setupPWM(); // セットアップはコードの方で
 
@@ -69,37 +63,38 @@ void MTKNanoESP32::setup_sensor(int rx, int tx, int *muxPins, bool raw_data, int
 
     pinMode(A0, INPUT); // this is a workaround for a bug
 
-    // タッチ認識用の基底値（=noise）の取得
-    // TODO:形式を変えるべき
-    if (this->_raw_data == false)
-    {
-        for (int ii = 0; ii < 10; ii++)
-        {
-            for (int i = 0; i < this->_numTx; i++)
-            {
-                selectChannelOut(i);
-                // Read RX
-                for (int j = 0; j < this->_numRx; j++)
-                {
-                    this->noise[i][j] = analogRead(_analogPins[j]);
+    // ノイズリセット
+    for (size_t tx = 0; tx < this->_numTx; tx++){
+        for (size_t rx = 0; rx < this->_numRx; rx++){
+            noise[tx][rx] = 1; // ゼロ除算を防ぐ
+        }
+    }
+    // タッチ認識用の基底値の取得
+    int correctFrame = 30;
+    if (this->_correct == true){
+        for(int i=0; i < correctFrame; ++i){
+            if(i % 4 < 2){
+                digitalWrite(LED_BUILTIN, HIGH);
+            }else{
+                digitalWrite(LED_BUILTIN, LOW);
+            }
+            for (size_t tx = 0; tx < this->_numTx; tx++){
+                selectChannelOut(tx); // 信号送信先の変更
+                for (size_t rx = 0; rx < this->_numRx; rx++){
+                    int rawValue = analogRead(_analogPins[rx]);
+                    if(rawValue > noise[tx][rx]){
+                        noise[tx][rx] = rawValue;
+                    }
+                    if(i == correctFrame - 1){ // 出力
+                        Serial.print(noise[tx][rx]);
+                        Serial.print(",");
+                    }
+                }
+                if(i == correctFrame - 1){ // 出力
+                    Serial.println("");
                 }
             }
         }
-    }
-
-    // BLEの初期化とサービスの追加
-    if (toBLE) {
-        if(BLE.begin()){
-            Serial.println("BLEStart");
-        }
-        BLE.setDeviceName("ArduinoNanoESP32");
-        for (int i = 0; i < 6; i++) {
-            bleService.addCharacteristic(charArray[i]);
-        }
-        BLE.addService(bleService);
-        BLE.setLocalName("CylindricalController");
-        BLE.setAdvertisedService(bleService);
-        BLE.advertise();
     }
 
     // 一旦コメントアウト
@@ -122,49 +117,20 @@ void MTKNanoESP32::setup_sensor(int rx, int tx, int *muxPins, bool raw_data, int
 void MTKNanoESP32::read()
 {
     if (toBLE){
-        const int bufferSize = 180;
-        char sendValues[bufferSize] = {0};
-        int index;
-        for (int i = 0; i < this->_numTx; i++){
-            // 送信先キャラクタリスティックを変更する
-            if(i % 4 == 0){
-                memset(sendValues, '\0', sizeof(sendValues)); // バッファの初期化
-                index = 0; // インデックスの初期化
-            }
-            selectChannelOut(i); // 信号送信先の変更
-            int length = snprintf(sendValues + index, bufferSize - index, "%d", i); // 行番号の出力
-            index += length;
-
-            // Read RX
-            for (int j = 0; j < this->_numRx; j++)
-            {
-                int rawValue = analogRead(_analogPins[j]);
-                // float filteredValue = lowpassFilters[j]->input(rawValue); // フィルタを適用
-                length = snprintf(sendValues + index, bufferSize - index, ",%03d", rawValue); // %03dゼロ埋めフォーマット
-                index += length;
-            }
-
-            length = snprintf(sendValues + index, bufferSize - index, ":"); // 行終端の出力
-            index += length;
-
-            if(i == 22){
-                // getIMU();
-                // 加速度
-                for(int k = 0; k < 3; ++k){
-                    length = snprintf(sendValues + index, bufferSize - index, "_%d", this->accel[k]); // 行終端の出力
-                    index += length;
-                }
-                // 角速度
-                for(int k = 0; k < 3; ++k){
-                    length = snprintf(sendValues + index, bufferSize - index, "_%d", this->accel[k+4]); // 行終端の出力
-                    index += length;
-                }
-            }
-
-            if(i % 4 == 3 || i == 22){ // 4行ごとにキャラクタリスティックに登録
-                charArray[i/5].writeValue((const uint8_t*)sendValues, index);
+        for (size_t tx = 0; tx < this->_numTx; tx++){
+            selectChannelOut(tx); // 信号送信先の変更
+            for (size_t rx = 0; rx < this->_numRx; rx++){
+                double rawValue = (double)analogRead(_analogPins[rx]);
+                this->timelineDatas[tx][rx][this->writeID] = rawValue / noise[tx][rx]; // 書込
             }
         }
+        this->writeID = (this->writeID+1)%10; // インデックスの更新
+        Serial.println("read");
+        // for(int i = 0; i < 10; ++i){
+        //   Serial.print(this->timelineDatas[0][0][i]);
+        //   Serial.print(",");
+        // }
+        // Serial.println("");
     }else if (Serial){
         // データの出力方式によって変化→シリアル通信は生の値のみにした
         for (int i = 0; i < this->_numTx; i++) // 各出力先につき繰り返し

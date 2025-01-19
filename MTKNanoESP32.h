@@ -34,7 +34,7 @@ private:
   int _numMuxPins = MTK_DEFAULT_MUX_CNTRL;
   char *_adcPins;
   int *_muxPins;
-  bool _raw_data;
+  bool _correct;
   int _threshold;
 
   int *_analogPins;
@@ -44,11 +44,15 @@ private:
   int MPU_addr;
   int *_IMUPins;
 
-  BLEService bleService;
-  BLECharacteristic charArray[6];
+  // // BLE関連
+  // BLEService bleService;
+  // BLEUnsignedLongCharacteristic bleCharacteristic;
+
+  double (*timelineDatas)[8][10]; // 入出力端子数を自作デバイス専用にしている 配列用ポインタを受け取る
+  int writeID; // 書き込み先のインデックス
   //---------- Converting Decimal to Binary -----------
 
-  int noise[16][16];
+  int noise[23][8]; // 入出力端子数を自作デバイス専用にしている
 
   void setupPWM();
   void selectChannelOut(int channel);
@@ -59,7 +63,7 @@ public:
   MTKNanoESP32();
 
   // Setup
-  void setup_sensor(int rx, int tx, int *muxPins, bool raw_data, int threshold, int numMuxPins, int *analogPins, bool toBLE, int *IMUPins);
+  void setup_sensor(int *muxPins, bool correct, int threshold, int numMuxPins, int *analogPins, bool toBLE, int *IMUPins, double timelineDatas[][8][10]);
 
   // Run measurements and send them via Serial
   void read();
