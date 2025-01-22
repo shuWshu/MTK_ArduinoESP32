@@ -48,11 +48,12 @@ private:
   // BLEService bleService;
   // BLEUnsignedLongCharacteristic bleCharacteristic;
 
-  double (*timelineDatas)[8][10]; // 入出力端子数を自作デバイス専用にしている 配列用ポインタを受け取る
-  int writeID; // 書き込み先のインデックス
+  int (*timelineDatas)[8][10]; // 入出力端子数を自作デバイス専用にしている 配列用ポインタを受け取る
+  int* writeID; // 書き込み先のインデックス 参照渡し
+  int shift;
   //---------- Converting Decimal to Binary -----------
 
-  int noise[23][8]; // 入出力端子数を自作デバイス専用にしている
+  int (*noise)[8]; // 入出力端子数を自作デバイス専用にしている
 
   void setupPWM();
   void selectChannelOut(int channel);
@@ -63,7 +64,7 @@ public:
   MTKNanoESP32();
 
   // Setup
-  void setup_sensor(int *muxPins, bool correct, int threshold, int numMuxPins, int *analogPins, bool toBLE, int *IMUPins, double timelineDatas[][8][10]);
+  void setup_sensor(int *muxPins, bool correct, int threshold, int numMuxPins, int *analogPins, bool toBLE, int *IMUPins, int timelineDatas[][8][10], int* writeID, int noise[][8]);
 
   // Run measurements and send them via Serial
   void read();

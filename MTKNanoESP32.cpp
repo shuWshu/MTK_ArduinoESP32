@@ -38,7 +38,7 @@ MTKNanoESP32::MTKNanoESP32(void)
  *   @return void
  */
 // スケッチ内のsetup()内にて呼び出される関数
-void MTKNanoESP32::setup_sensor(int *muxPins, bool correct, int threshold, int numMuxPins, int *analogPins, bool toBLE, int *IMUPins, double timelineDatas[][8][10])
+void MTKNanoESP32::setup_sensor(int *muxPins, bool correct, int threshold, int numMuxPins, int *analogPins, bool toBLE, int *IMUPins, int timelineDatas[][8][10], int* writeID, int noise[][8])
 {
     this->_numRx = 8;              // 入力端子数
     this->_numTx = 23;              // 出力端子数
@@ -50,7 +50,10 @@ void MTKNanoESP32::setup_sensor(int *muxPins, bool correct, int threshold, int n
     this->toBLE = toBLE; // 出力先をBLEにするか
     this->_IMUPins = IMUPins;
     this->timelineDatas = timelineDatas;
-    this->writeID = 0; // 書き込み先インデックスのリセット
+    this->writeID = writeID; // 書き込み先インデックスを決定
+    this->noise = noise;
+
+     *this->writeID = 0; // 書き込み先インデックスのリセット
     
     // set the PWM values
     // setupPWM(); // セットアップはコードの方で
@@ -63,12 +66,6 @@ void MTKNanoESP32::setup_sensor(int *muxPins, bool correct, int threshold, int n
 
     pinMode(A0, INPUT); // this is a workaround for a bug
 
-    // ノイズリセット
-    for (size_t tx = 0; tx < this->_numTx; tx++){
-        for (size_t rx = 0; rx < this->_numRx; rx++){
-            noise[tx][rx] = 1; // ゼロ除算を防ぐ
-        }
-    }
     // タッチ認識用の基底値の取得
     int correctFrame = 30;
     if (this->_correct == true){
@@ -82,11 +79,11 @@ void MTKNanoESP32::setup_sensor(int *muxPins, bool correct, int threshold, int n
                 selectChannelOut(tx); // 信号送信先の変更
                 for (size_t rx = 0; rx < this->_numRx; rx++){
                     int rawValue = analogRead(_analogPins[rx]);
-                    if(rawValue > noise[tx][rx]){
-                        noise[tx][rx] = rawValue;
+                    if(rawValue > this->noise[tx][rx]){
+                        this->noise[tx][rx] = rawValue;
                     }
                     if(i == correctFrame - 1){ // 出力
-                        Serial.print(noise[tx][rx]);
+                        Serial.print(this->noise[tx][rx]);
                         Serial.print(",");
                     }
                 }
@@ -121,11 +118,11 @@ void MTKNanoESP32::read()
             selectChannelOut(tx); // 信号送信先の変更
             for (size_t rx = 0; rx < this->_numRx; rx++){
                 double rawValue = (double)analogRead(_analogPins[rx]);
-                this->timelineDatas[tx][rx][this->writeID] = rawValue / noise[tx][rx]; // 書込
+                this->timelineDatas[tx][rx][*writeID] = rawValue; // 書込
             }
         }
-        this->writeID = (this->writeID+1)%10; // インデックスの更新
-        Serial.println("read");
+        *writeID = (*writeID+1)%10; // インデックスの更新
+        //Serial.println("read");
         // for(int i = 0; i < 10; ++i){
         //   Serial.print(this->timelineDatas[0][0][i]);
         //   Serial.print(",");
